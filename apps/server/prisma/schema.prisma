@@ -1,0 +1,16 @@
+datasource db {
+  provider = "mysql"
+}
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+model Course {
+  id        Int      @id @default(autoincrement())
+  name      String
+  teacher   String
+  time      DateTime
+  capacity  Int
+  createdAt DateTime @default(now())
+}

@@ -31,7 +31,3 @@ vite.config.timestamp-*
 
 # TypeScript
 *.tsbuildinfo
-
-# Env
-.env
-.env.*.local

@@ -4,7 +4,7 @@ import { onMounted, ref } from 'vue'
 const message = ref('加载中...')
 
 onMounted(async () => {
-  const res = await fetch('http://localhost:3100/api/courses')
+  const res = await fetch('http://localhost:3100/api/v1/courses')
   const data = await res.json()
   message.value = data
 })

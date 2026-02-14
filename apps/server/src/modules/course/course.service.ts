@@ -1,5 +1,11 @@
 import { Injectable } from "@nestjs/common";
 
+export interface ApiResponse<T> {
+  code: number;
+  message: string;
+  data: T;
+}
+
 export interface Course {
   id: number;
   name: string;
