@@ -1,76 +1,79 @@
+/**
+ * Prisma 服务：
+ * 负责创建 PrismaClient（MariaDB 适配器）并在模块生命周期中维护连接。
+ */
 import {
   Injectable,
   OnModuleDestroy,
   OnModuleInit,
-} from '@nestjs/common'; // 导入生命周期接口与 Injectable 装饰器
-import { PrismaMariaDb } from '@prisma/adapter-mariadb'; // 导入 MariaDB 驱动适配器
-import { PrismaClient } from '@prisma/client'; // 导入 Prisma 客户端
+} from "@nestjs/common";
+import { PrismaMariaDb } from "@prisma/adapter-mariadb";
+import { PrismaClient } from "@prisma/client";
+import { URL } from "node:url";
 
-@Injectable() // 标记为可注入服务
+@Injectable()
 export class PrismaService
   extends PrismaClient
   implements OnModuleInit, OnModuleDestroy
 {
-  // 构造 Prisma 客户端并注入数据库适配器
   constructor() {
-    // 读取数据库连接字符串
+    // 启动阶段强校验数据库连接串，避免服务启动后才暴露配置错误。
     const databaseUrl = process.env.DATABASE_URL;
-
-    // 未配置连接字符串时直接抛错
     if (!databaseUrl) {
-      throw new Error('DATABASE_URL is not set');
+      throw new Error("DATABASE_URL is not set");
     }
 
-    // 声明 URL 解析结果变量
     let parsedUrl: URL;
-
-    // 解析 DATABASE_URL
     try {
       parsedUrl = new URL(databaseUrl);
-    // URL 非法时抛出明确错误
     } catch {
-      throw new Error('DATABASE_URL is invalid');
+      throw new Error("DATABASE_URL is invalid");
     }
 
-    // 创建 MariaDB 适配器并配置连接参数
+    // 从 DATABASE_URL 解析连接参数，组装 MariaDB adapter。
+    const charset = process.env.DATABASE_CHARSET ?? "utf8mb4";
+    const collation = process.env.DATABASE_COLLATION ?? "utf8mb4_unicode_ci";
+
     const adapter = new PrismaMariaDb({
-      host: parsedUrl.hostname, // 数据库主机地址
-      port: parsedUrl.port ? Number(parsedUrl.port) : 3306, // 数据库端口，默认 3306
-      user: decodeURIComponent(parsedUrl.username), // 数据库用户名
-      password: decodeURIComponent(parsedUrl.password), // 数据库密码
-      database: parsedUrl.pathname.replace(/^\//, ''), // 数据库名
+      host: parsedUrl.hostname,
+      port: parsedUrl.port ? Number(parsedUrl.port) : 3306,
+      user: decodeURIComponent(parsedUrl.username),
+      password: decodeURIComponent(parsedUrl.password),
+      database: parsedUrl.pathname.replace(/^\//, ""),
+      // 显式指定连接字符集与排序规则，避免不同客户端默认值不一致。
+      charset,
+      collation,
       connectTimeout: PrismaService.parseTimeout(
         process.env.DATABASE_CONNECT_TIMEOUT_MS,
         10000,
-      ), // 建连超时配置
+      ),
       acquireTimeout: PrismaService.parseTimeout(
         process.env.DATABASE_ACQUIRE_TIMEOUT_MS,
         30000,
-      ), // 连接池获取超时配置
+      ),
     });
 
-    // 将 adapter 传给 PrismaClient 父类构造函数
     super({ adapter });
   }
 
-  // 模块初始化时建立数据库连接
+  // 模块初始化时主动建立连接，尽早发现数据库不可用问题。
   async onModuleInit(): Promise<void> {
     await this.$connect();
   }
 
-  // 模块销毁时断开数据库连接
+  // 进程退出或模块销毁时释放连接，避免连接泄漏。
   async onModuleDestroy(): Promise<void> {
     await this.$disconnect();
   }
 
-  // 解析超时配置，非法值时回退默认值
+  /**
+   * 解析超时配置；非法值回退到默认值。
+   */
   private static parseTimeout(
     raw: string | undefined,
     fallback: number,
   ): number {
-    // 尝试转换为数字
     const parsed = Number(raw);
-    // 返回有效正数，否则回退默认值
     return Number.isFinite(parsed) && parsed > 0 ? parsed : fallback;
   }
 }

@@ -1,3 +1,5 @@
+// Prisma Schema：定义课程、学员、课次、预约四类核心模型。
+// 说明：数据库连接由 prisma.config.ts 注入，这里只声明 provider。
 datasource db {
   provider = "mysql"
 }
@@ -7,10 +9,55 @@ generator client {
 }
 
 model Course {
-  id        Int      @id @default(autoincrement())
+  id        Int            @id @default(autoincrement())
   name      String
   teacher   String
   time      DateTime
   capacity  Int
-  createdAt DateTime @default(now())
+  createdAt DateTime       @default(now())
+  sessions  ClassSession[]
+}
+
+model Student {
+  id        Int       @id @default(autoincrement())
+  name      String
+  phone     String?   @unique
+  createdAt DateTime  @default(now())
+  bookings  Booking[]
+}
+
+model ClassSession {
+  id        Int       @id @default(autoincrement())
+  courseId  Int
+  course    Course    @relation(fields: [courseId], references: [id])
+  startTime DateTime
+  endTime   DateTime
+  capacity  Int
+  createdAt DateTime  @default(now())
+  bookings  Booking[]
+
+  // 常用筛选维度索引：按课程与时间范围查询课次。
+  @@index([courseId])
+  @@index([startTime])
+}
+
+enum BookingStatus {
+  BOOKED
+  CANCELLED
+}
+
+model Booking {
+  id             Int           @id @default(autoincrement())
+  studentId      Int
+  classSessionId Int
+  status         BookingStatus @default(BOOKED)
+  createdAt      DateTime      @default(now())
+  student        Student       @relation(fields: [studentId], references: [id])
+  classSession   ClassSession  @relation(fields: [classSessionId], references: [id])
+
+  // 联合唯一约束：防止同一学员重复预约同一课次。
+  @@unique([studentId, classSessionId])
+  // 预约名单与学员预约历史查询会命中以下索引。
+  @@index([classSessionId])
+  @@index([studentId])
 }

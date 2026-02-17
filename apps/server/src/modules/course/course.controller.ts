@@ -1,53 +1,28 @@
-﻿import { Body, Controller, Get, Post } from "@nestjs/common"; // 导入路由与参数装饰器
+/**
+ * 课程控制器：
+ * 提供课程创建与分页查询接口。
+ */
+import { Body, Controller, Get, Post, Query } from "@nestjs/common";
+import { Course, CoursePageData, CourseService } from "./course.service";
+import { CreateCourseDto } from "./dto/create-course.dto";
+import { ListCourseDto } from "./dto/list-course.dto";
 
-import { CreateCourseDto } from "./dto/create-course-dto"; // 导入创建课程 DTO
-import { Course, CourseService } from "./course.service"; // 导入课程服务与类型
-
-interface ApiResponse<T> {
-  code: number;
-  message: string;
-  data: T;
-}
-
-@Controller("courses") // 路由前缀：/courses
+@Controller("courses")
 export class CourseController {
-  constructor(private readonly courseService: CourseService) {} // 注入课程服务
+  constructor(private readonly courseService: CourseService) {}
 
-  @Get() // GET /api/v1/courses
-  async getCourses(): Promise<ApiResponse<Course[] | null>> {
-    try {
-      const result = await this.courseService.findAll();
-      return {
-        code: 0,
-        message: "ok",
-        data: result,
-      };
-    } catch (error) {
-      return {
-        code: 500,
-        message: error instanceof Error ? error.message : "internal server error",
-        data: null,
-      };
-    }
+  // 课程分页列表：默认第一页，每页 10 条。
+  @Get()
+  async getCourses(@Query() query: ListCourseDto): Promise<CoursePageData> {
+    // 分页参数默认值
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 10;
+    return this.courseService.findAll(page, pageSize);
   }
 
-  @Post() // POST /api/v1/courses
-  async createCourse(
-    @Body() body: CreateCourseDto,
-  ): Promise<ApiResponse<Course | null>> {
-    try {
-      const result = await this.courseService.create(body);
-      return {
-        code: 0,
-        message: "ok",
-        data: result,
-      };
-    } catch (error) {
-      return {
-        code: 500,
-        message: error instanceof Error ? error.message : "internal server error",
-        data: null,
-      };
-    }
+  // 创建课程：由 DTO 完成字段合法性校验。
+  @Post()
+  async createCourse(@Body() dto: CreateCourseDto): Promise<Course> {
+    return this.courseService.create(dto);
   }
 }

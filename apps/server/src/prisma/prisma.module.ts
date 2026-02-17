@@ -1,9 +1,14 @@
-import { Module } from '@nestjs/common'; // 导入 Module 装饰器
+/**
+ * Prisma 模块：
+ * 统一导出 PrismaService，供业务模块注入使用。
+ */
+import { Module } from "@nestjs/common";
+import { PrismaService } from "./prisma.service";
 
-import { PrismaService } from './prisma.service'; // 导入 Prisma 服务
-
-@Module({ // 定义 Prisma 模块元数据
-  providers: [PrismaService], // 注册 PrismaService 提供者
-  exports: [PrismaService], // 向外导出 PrismaService
-}) // 结束模块元数据定义
-export class PrismaModule {} // 导出 Prisma 模块
+@Module({
+  // PrismaService 作为单例提供，避免每个模块重复创建数据库连接。
+  providers: [PrismaService],
+  // 导出后其余业务模块可直接注入 PrismaService。
+  exports: [PrismaService],
+})
+export class PrismaModule {}

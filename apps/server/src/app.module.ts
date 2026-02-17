@@ -1,11 +1,20 @@
-import { Module } from "@nestjs/common"; // 导入 Module 装饰器
-import { AppController } from "./app.controller"; // 导入应用控制器
-import { AppService } from "./app.service"; // 导入应用服务
-import { CourseModule } from "./modules/course/course.module"; // 导入课程模块
+/**
+ * 应用根模块：
+ * 负责聚合全部业务模块，并注册根控制器与根服务。
+ */
+import { Module } from "@nestjs/common";
+import { AppController } from "./app.controller";
+import { AppService } from "./app.service";
+import { BookingModule } from "./modules/booking/booking.module";
+import { CourseModule } from "./modules/course/course.module";
+import { SessionModule } from "./modules/session/session.module";
+import { StudentModule } from "./modules/student/student.module";
 
-@Module({ // 定义应用根模块元数据
-  imports: [CourseModule], // 注册依赖模块
-  controllers: [AppController], // 注册控制器
-  providers: [AppService], // 注册服务提供者
-}) // 结束模块元数据定义
-export class AppModule {} // 导出应用根模块
+@Module({
+  // 统一汇总业务模块；后续扩展模块时只需在这里追加 imports。
+  // 模块装配顺序对功能无影响，按业务域分组便于维护。
+  imports: [CourseModule, StudentModule, SessionModule, BookingModule],
+  controllers: [AppController],
+  providers: [AppService],
+})
+export class AppModule {}

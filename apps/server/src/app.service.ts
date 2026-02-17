@@ -1,8 +1,16 @@
-import { Injectable } from "@nestjs/common"; // 导入 Injectable 装饰器
+/**
+ * 根服务：
+ * 存放与业务无关的基础示例逻辑。
+ */
+import { Injectable } from "@nestjs/common";
 
-@Injectable() // 标记服务可被注入
-export class AppService { // 应用基础服务类
-  getHello(): string { // 示例方法
-    return "Hello World!"; // 返回问候语
-  } // 结束 getHello 方法
-} // 结束 AppService 类定义
+@Injectable()
+export class AppService {
+  /**
+   * 返回默认欢迎文本。
+   * 该方法保留为最小示例，也可替换为版本号、健康状态等信息。
+   */
+  getHello(): string {
+    return "Hello World!";
+  }
+}

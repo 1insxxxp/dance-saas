@@ -1,29 +1,50 @@
-﻿import { Injectable } from "@nestjs/common"; // 导入 Injectable 装饰器
-import { Course as PrismaCourse } from "@prisma/client"; // 导入 Prisma 的 Course 类型
+/**
+ * 课程服务：
+ * 负责课程创建与分页查询。
+ */
+import { Injectable } from "@nestjs/common";
+import { Course as PrismaCourse } from "@prisma/client";
+import { PrismaService } from "../../prisma/prisma.service";
+import { CreateCourseDto } from "./dto/create-course.dto";
 
-import { PrismaService } from "../../prisma/prisma.service"; // 导入 Prisma 服务
-import { CreateCourseDto } from "./dto/create-course-dto"; // 导入创建课程 DTO
+export type Course = PrismaCourse;
 
-export type Course = PrismaCourse; // 统一 Course 类型别名
+export interface CoursePageData {
+  items: Course[];
+  total: number;
+  page: number;
+  pageSize: number;
+}
 
-@Injectable() // 标记为可注入服务
+@Injectable()
 export class CourseService {
-  constructor(private readonly prisma: PrismaService) {} // 注入 PrismaService
+  constructor(private readonly prisma: PrismaService) {}
 
-  // 只做数据库查询，返回纯课程数据
-  async findAll(): Promise<Course[]> {
-    return this.prisma.course.findMany({
-      orderBy: { id: "desc" },
-    });
+  async findAll(page: number, pageSize: number): Promise<CoursePageData> {
+    // skip/take 是 Prisma 分页标准实现。
+    const skip = (page - 1) * pageSize;
+
+    // 事务中并发查询：列表数据 + 总数。
+    const [items, total] = await this.prisma.$transaction([
+      this.prisma.course.findMany({
+        orderBy: { id: "desc" },
+        skip,
+        take: pageSize,
+      }),
+      this.prisma.course.count(),
+    ]);
+
+    return { items, total, page, pageSize };
   }
 
-  // 只做数据库写入，返回创建后的纯课程数据
   async create(dto: CreateCourseDto): Promise<Course> {
-    const data = {
-      ...dto,
-      time: new Date(dto.time), // body 的 time 是字符串，这里转换成 Date
-    };
-
-    return this.prisma.course.create({ data });
+    // DTO 中 time 已转换为 Date，这里再次标准化可避免隐式类型差异。
+    // 显式标准化 time，避免字符串日期在后续链路出现类型分歧。
+    return this.prisma.course.create({
+      data: {
+        ...dto,
+        time: new Date(dto.time),
+      },
+    });
   }
 }
