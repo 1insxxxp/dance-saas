@@ -1,10 +1,4 @@
-import { http } from "../lib/http";
-
-export interface ApiResponse<T> {
-  code: number;
-  message: string;
-  data: T;
-}
+import { request } from "../lib/request";
 
 export interface Student {
   id: number;
@@ -26,22 +20,37 @@ export interface ListStudentsParams {
   keyword?: string;
 }
 
+export interface CreateStudentPayload {
+  name: string;
+  phone?: string | null;
+}
+
+export interface UpdateStudentPayload {
+  name?: string;
+  phone?: string | null;
+}
+
 export async function listStudents(
   params: ListStudentsParams = {},
 ): Promise<StudentListData> {
-  const res = await http.get<ApiResponse<StudentListData>>("/students", { params });
-  return res.data.data;
+  return request.get<StudentListData>("/students", { params });
 }
 
-export async function createStudent(payload: {
-  name: string;
-  phone?: string;
-}): Promise<Student> {
-  const res = await http.post<ApiResponse<Student>>("/students", payload);
-  return res.data.data;
+export async function createStudent(
+  payload: CreateStudentPayload,
+): Promise<Student> {
+  return request.post<Student>("/students", payload);
 }
 
-export async function deleteStudent(id: number): Promise<Student> {
-  const res = await http.delete<ApiResponse<Student>>(`/students/${id}`);
-  return res.data.data;
+export async function updateStudent(
+  id: number,
+  payload: UpdateStudentPayload,
+): Promise<Student> {
+  return request.patch<Student>(`/students/${id}`, payload);
 }
+
+export async function removeStudent(id: number): Promise<Student> {
+  return request.delete<Student>(`/students/${id}`);
+}
+
+export const deleteStudent = removeStudent;
