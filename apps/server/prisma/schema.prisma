@@ -46,6 +46,11 @@ enum BookingStatus {
   CANCELLED
 }
 
+enum Role {
+  SUPER
+  NORMAL
+}
+
 model Booking {
   id             Int           @id @default(autoincrement())
   studentId      Int
@@ -66,5 +71,7 @@ model Admin {
   id        Int      @id @default(autoincrement())
   username  String   @unique
   password  String
+  refreshTokenHash String?
+  role      Role     @default(NORMAL)
   createdAt DateTime @default(now())
 }

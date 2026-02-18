@@ -27,9 +27,13 @@ import StudentForm from "./components/StudentForm.vue";
 import StudentTable from "./components/StudentTable.vue";
 
 const TOKEN_KEY = "token";
+const ACCESS_TOKEN_KEY = "accessToken";
+const REFRESH_TOKEN_KEY = "refreshToken";
+const ROLE_KEY = "role";
 const LOGIN_PATH = "/login";
 const DASHBOARD_PATH = "/";
 const AUTH_LOGOUT_EVENT = "auth:logout";
+type AdminRole = "SUPER" | "NORMAL" | "";
 
 const uiState = reactive({
   listLoading: false,
@@ -40,6 +44,7 @@ const editModalOpen = ref(false);
 const editingRecord = ref<Student | null>(null);
 const liveText = ref("系统就绪");
 const isAuthenticated = ref(false);
+const currentRole = ref<AdminRole>("");
 const loginLoading = ref(false);
 const loginForm = reactive({
   username: "",
@@ -67,6 +72,8 @@ const totalPages = computed(() => {
 const summaryText = computed(() => {
   return `共 ${total.value} 位学员 · 第 ${page.value} / ${totalPages.value} 页 · 每页 ${pageSize.value} 条`;
 });
+
+const canDelete = computed(() => currentRole.value === "SUPER");
 
 const themeConfig = {
   token: {
@@ -113,7 +120,59 @@ function getToken() {
     return "";
   }
 
-  return window.localStorage.getItem(TOKEN_KEY) ?? "";
+  return (
+    window.localStorage.getItem(ACCESS_TOKEN_KEY) ??
+    window.localStorage.getItem(TOKEN_KEY) ??
+    ""
+  );
+}
+
+function normalizeRole(value: unknown): AdminRole {
+  return value === "SUPER" || value === "NORMAL" ? value : "";
+}
+
+function getStoredRole(): AdminRole {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return normalizeRole(window.localStorage.getItem(ROLE_KEY));
+}
+
+function setRole(role: AdminRole) {
+  currentRole.value = role;
+
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (role) {
+    window.localStorage.setItem(ROLE_KEY, role);
+    return;
+  }
+
+  window.localStorage.removeItem(ROLE_KEY);
+}
+
+function parseJwtPayload(token: string): Record<string, unknown> | null {
+  const segments = token.split(".");
+  if (segments.length < 2) {
+    return null;
+  }
+
+  try {
+    const base64 = segments[1].replace(/-/g, "+").replace(/_/g, "/");
+    const padded = base64.padEnd(Math.ceil(base64.length / 4) * 4, "=");
+    const json = window.atob(padded);
+    return JSON.parse(json) as Record<string, unknown>;
+  } catch {
+    return null;
+  }
+}
+
+function extractRoleFromToken(token: string): AdminRole {
+  const payload = parseJwtPayload(token);
+  return normalizeRole(payload?.role);
 }
 
 function syncAuthState() {
@@ -121,20 +180,27 @@ function syncAuthState() {
   isAuthenticated.value = Boolean(token);
 
   if (isAuthenticated.value) {
+    const storedRole = getStoredRole();
+    setRole(storedRole || extractRoleFromToken(token));
+
     if (window.location.pathname === LOGIN_PATH) {
       replacePath(DASHBOARD_PATH);
     }
     return;
   }
 
+  setRole("");
   clearDashboardState();
   replacePath(LOGIN_PATH);
 }
 
 function handleLogout(options?: { silent?: boolean }) {
   if (typeof window !== "undefined") {
+    window.localStorage.removeItem(ACCESS_TOKEN_KEY);
     window.localStorage.removeItem(TOKEN_KEY);
+    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
   }
+  setRole("");
 
   isAuthenticated.value = false;
   clearDashboardState();
@@ -156,12 +222,26 @@ async function handleLogin() {
 
   loginLoading.value = true;
   try {
-    const result = await request.post<{ token: string }>("/auth/login", {
+    const result = await request.post<{
+      token?: string;
+      accessToken?: string;
+      refreshToken?: string;
+      role?: "SUPER" | "NORMAL";
+    }>("/auth/login", {
       username,
       password,
     });
 
-    window.localStorage.setItem(TOKEN_KEY, result.token);
+    const accessToken = result.accessToken ?? result.token;
+    const refreshToken = result.refreshToken;
+    if (!accessToken || !refreshToken) {
+      throw new Error("登录返回的 token 数据不完整");
+    }
+
+    window.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
+    window.localStorage.setItem(TOKEN_KEY, accessToken);
+    window.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
+    setRole(normalizeRole(result.role) || extractRoleFromToken(accessToken));
     isAuthenticated.value = true;
     loginForm.username = "";
     loginForm.password = "";
@@ -575,6 +655,7 @@ onBeforeUnmount(() => {
             <StudentTable
               :list="students"
               :deleting-id="uiState.deletingId"
+              :can-delete="canDelete"
               :saving="uiState.saving"
               :edit-modal-open="editModalOpen"
               :editing-record="editingRecord"
@@ -932,11 +1013,30 @@ onBeforeUnmount(() => {
   color: #102a6a;
 }
 
+:deep(.ant-form),
+:deep(.ant-form-item),
+:deep(.ant-form-item-control),
+:deep(.ant-form-item-control-input),
+:deep(.ant-form-item-control-input-content) {
+  width: 100%;
+}
+
 :deep(.ant-input),
+:deep(.ant-input-affix-wrapper),
+:deep(.ant-input-password),
+:deep(.ant-select),
 :deep(.ant-select-selector) {
+  width: 100%;
+  box-sizing: border-box;
   border-radius: 12px !important;
   border-color: #bfdbfe !important;
   background: rgba(248, 250, 255, 0.92) !important;
+}
+
+:deep(.ant-input-affix-wrapper .ant-input),
+:deep(.ant-input-password .ant-input),
+:deep(.ant-select-selector) {
+  width: 100%;
 }
 
 :deep(.ant-btn) {

@@ -7,6 +7,7 @@ import type { Student } from "../api/student";
 const props = defineProps<{
   list: Student[];
   deletingId: number | null;
+  canDelete: boolean;
   saving: boolean;
   editModalOpen: boolean;
   editingRecord: Student | null;
@@ -121,6 +122,7 @@ function handleSubmitEdit() {
             </a-button>
 
             <a-popconfirm
+              v-if="props.canDelete"
               title="确认删除该学员吗？"
               ok-text="确认"
               cancel-text="取消"

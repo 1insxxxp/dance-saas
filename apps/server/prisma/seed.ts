@@ -1,11 +1,14 @@
-/**
+﻿/**
  * Seed 脚本：
- * 初始化默认管理员（仅当 Admin 表为空时创建）。
+ * 初始化后台管理员账号，并保证重复执行时结果一致。
  */
 import "dotenv/config";
 import { PrismaMariaDb } from "@prisma/adapter-mariadb";
-import { PrismaClient } from "@prisma/client";
+import { PrismaClient, Role } from "@prisma/client";
+import bcrypt from "bcrypt";
 import { URL } from "node:url";
+
+const BCRYPT_SALT_ROUNDS = 10;
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) {
@@ -26,21 +29,44 @@ const adapter = new PrismaMariaDb({
 const prisma = new PrismaClient({ adapter });
 
 async function main() {
-  const adminCount = await prisma.admin.count();
+  const [adminPasswordHash, testPasswordHash] = await Promise.all([
+    bcrypt.hash("123456", BCRYPT_SALT_ROUNDS),
+    bcrypt.hash("123456", BCRYPT_SALT_ROUNDS),
+  ]);
 
-  if (adminCount > 0) {
-    console.log("[seed] Admin already exists, skip.");
-    return;
-  }
-
-  await prisma.admin.create({
-    data: {
+  // 默认超级管理员：admin / 123456（数据库存储为 bcrypt 哈希）。
+  await prisma.admin.upsert({
+    where: { username: "admin" },
+    update: {
+      password: adminPasswordHash,
+      refreshTokenHash: null,
+      role: Role.SUPER,
+    },
+    create: {
       username: "admin",
-      password: "123456",
+      password: adminPasswordHash,
+      refreshTokenHash: null,
+      role: Role.SUPER,
     },
   });
 
-  console.log("[seed] Default admin created: admin / 123456");
+  // 测试账号：test / 123456（数据库存储为 bcrypt 哈希）。
+  await prisma.admin.upsert({
+    where: { username: "test" },
+    update: {
+      password: testPasswordHash,
+      refreshTokenHash: null,
+      role: Role.NORMAL,
+    },
+    create: {
+      username: "test",
+      password: testPasswordHash,
+      refreshTokenHash: null,
+      role: Role.NORMAL,
+    },
+  });
+
+  console.log("[seed] Accounts ready: admin(SUPER), test(NORMAL)");
 }
 
 main()

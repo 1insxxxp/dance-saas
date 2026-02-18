@@ -1,6 +1,6 @@
 ﻿/**
  * 应用启动入口：
- * 负责初始化 Nest 应用、全局参数校验、统一响应包装、全局异常处理与 JWT 全局鉴权。
+ * 负责初始化 Nest 应用、全局参数校验、统一响应包装、全局异常处理与全局鉴权。
  */
 import "reflect-metadata";
 import "dotenv/config";
@@ -14,6 +14,7 @@ import { AppModule } from "./app.module";
 import { ResponseInterceptor } from "./common/interceptors/response.interceptor";
 import { HttpExceptionFilter } from "./filters/http-exception.filter";
 import { JwtAuthGuard } from "./modules/auth/guards/jwt-auth.guard";
+import { RolesGuard } from "./modules/auth/guards/roles.guard";
 
 interface ValidationIssue {
   field: string;
@@ -62,8 +63,8 @@ async function bootstrap() {
   app.useGlobalInterceptors(new ResponseInterceptor());
   app.useGlobalFilters(new HttpExceptionFilter());
 
-  // JWT 守卫全局生效；无需鉴权的接口通过 @Public 显式放行。
-  app.useGlobalGuards(app.get(JwtAuthGuard));
+  // JWT + 角色守卫全局生效；无需鉴权的接口通过 @Public 显式放行。
+  app.useGlobalGuards(app.get(JwtAuthGuard), app.get(RolesGuard));
 
   app.setGlobalPrefix("api/v1");
   app.enableCors();

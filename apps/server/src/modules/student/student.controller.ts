@@ -13,6 +13,8 @@ import {
   Post,
   Query,
 } from "@nestjs/common";
+import { Role } from "@prisma/client";
+import { Roles } from "../auth/decorators/roles.decorator";
 import { CreateStudentDto } from "./dto/create-student.dto";
 import { ListStudentDto } from "./dto/list-student.dto";
 import { UpdateStudentDto } from "./dto/update-student.dto";
@@ -47,6 +49,8 @@ export class StudentController {
     return this.studentService.update(id, dto);
   }
 
+  // 删除仅允许超级管理员执行。
+  @Roles(Role.SUPER)
   @Delete(":id")
   async remove(@Param("id", ParseIntPipe) id: number): Promise<Student> {
     return this.studentService.remove(id);
