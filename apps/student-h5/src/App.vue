@@ -16,6 +16,7 @@ import {
   type Student,
   type StudentListData,
 } from "./api/student";
+import Pagination from "./components/Pagination.vue";
 
 const loading = ref(false);
 const creating = ref(false);
@@ -107,7 +108,7 @@ function writeQueryToUrl() {
   window.history.replaceState(null, "", nextUrl);
 }
 
-async function fetchStudents(options?: { resetPage?: boolean }) {
+async function fetchStudents(options?: { resetPage?: boolean; skipOverflowCheck?: boolean }) {
   if (options?.resetPage) {
     query.page = 1;
   }
@@ -126,6 +127,14 @@ async function fetchStudents(options?: { resetPage?: boolean }) {
     total.value = data.total;
     query.page = data.page;
     query.pageSize = data.pageSize;
+
+    const maxPage = Math.max(1, Math.ceil(total.value / query.pageSize));
+    if (!options?.skipOverflowCheck && query.page > maxPage) {
+      query.page = maxPage;
+      await fetchStudents({ skipOverflowCheck: true });
+      return;
+    }
+
     writeQueryToUrl();
     liveText.value = `列表已更新，共 ${data.total} 条记录`;
   } catch (error) {
@@ -168,8 +177,10 @@ async function handleDelete(id: number) {
     await removeStudent(id);
     message.success("学员已删除");
 
-    if (students.value.length === 1 && query.page > 1) {
-      query.page -= 1;
+    const nextTotal = Math.max(0, total.value - 1);
+    const totalPagesAfterDelete = Math.max(1, Math.ceil(nextTotal / query.pageSize));
+    if (query.page > totalPagesAfterDelete) {
+      query.page = totalPagesAfterDelete;
     }
 
     await fetchStudents();
@@ -181,22 +192,15 @@ async function handleDelete(id: number) {
 }
 
 function handleRefresh() {
-  void fetchStudents();
+  void fetchStudents({ resetPage: true });
 }
 
 function handleSearch() {
   void fetchStudents({ resetPage: true });
 }
 
-function handlePageChange(nextPage: number, nextPageSize: number) {
-  query.page = nextPage;
-  query.pageSize = nextPageSize;
-  void fetchStudents();
-}
-
-function handlePageSizeChange(_current: number, nextPageSize: number) {
-  query.page = 1;
-  query.pageSize = nextPageSize;
+function handlePageChange(newPage: number) {
+  query.page = newPage;
   void fetchStudents();
 }
 
@@ -387,18 +391,12 @@ onMounted(() => {
           </a-table-column>
         </a-table>
 
-        <div class="pagination-wrap">
-          <a-pagination
-            :current="query.page"
-            :page-size="query.pageSize"
-            :total="total"
-            :show-size-changer="true"
-            :page-size-options="['5', '10', '20', '50']"
-            :show-total="(v: number) => `共 ${v} 条`"
-            @change="handlePageChange"
-            @showSizeChange="handlePageSizeChange"
-          />
-        </div>
+        <Pagination
+          :page="query.page"
+          :page-size="query.pageSize"
+          :total="total"
+          @change="handlePageChange"
+        />
       </a-card>
     </main>
   </a-config-provider>
@@ -584,12 +582,6 @@ onMounted(() => {
 .time-text {
   font-variant-numeric: tabular-nums;
   color: #24414f;
-}
-
-.pagination-wrap {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 14px;
 }
 
 :deep(.ant-card-head-title) {
