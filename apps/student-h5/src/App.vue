@@ -1,75 +1,85 @@
 ﻿<script setup lang="ts">
-import { computed, onMounted, reactive, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, reactive, ref } from "vue";
 import { message } from "ant-design-vue";
 import {
   CalendarOutlined,
-  DeleteOutlined,
-  PlusOutlined,
+  LockOutlined,
+  LoginOutlined,
+  LogoutOutlined,
   ReloadOutlined,
+  SettingOutlined,
   SearchOutlined,
   TeamOutlined,
+  UserOutlined,
 } from "@ant-design/icons-vue";
 import {
   createStudent,
   listStudents,
   removeStudent,
+  updateStudent,
   type Student,
   type StudentListData,
 } from "./api/student";
+import { request } from "./api/request";
+import { usePagination } from "./composables/usePagination";
 import Pagination from "./components/Pagination.vue";
+import StudentForm from "./components/StudentForm.vue";
+import StudentTable from "./components/StudentTable.vue";
 
-const loading = ref(false);
-const creating = ref(false);
-const deletingId = ref<number | null>(null);
+const TOKEN_KEY = "token";
+const LOGIN_PATH = "/login";
+const DASHBOARD_PATH = "/";
+const AUTH_LOGOUT_EVENT = "auth:logout";
+
+const uiState = reactive({
+  listLoading: false,
+  saving: false,
+  deletingId: null as number | null,
+});
+const editModalOpen = ref(false);
+const editingRecord = ref<Student | null>(null);
 const liveText = ref("系统就绪");
+const isAuthenticated = ref(false);
+const loginLoading = ref(false);
+const loginForm = reactive({
+  username: "",
+  password: "",
+});
 
 const students = ref<Student[]>([]);
-const total = ref(0);
+const {
+  page,
+  pageSize,
+  total,
+  handlePageChange: setPage,
+  resetPage,
+} = usePagination();
 
 const query = reactive({
-  page: 1,
-  pageSize: 10,
   keyword: "",
 });
-
-const createForm = reactive({
-  name: "",
-  phone: "",
-});
-
-const dateFormatter = new Intl.DateTimeFormat("zh-CN", {
-  year: "numeric",
-  month: "2-digit",
-  day: "2-digit",
-  hour: "2-digit",
-  minute: "2-digit",
-  second: "2-digit",
-  hour12: false,
-});
+let keywordDebounceTimer: ReturnType<typeof setTimeout> | null = null;
 
 const totalPages = computed(() => {
-  return Math.max(1, Math.ceil(total.value / query.pageSize));
+  return Math.max(1, Math.ceil(total.value / pageSize.value));
 });
 
 const summaryText = computed(() => {
-  return `共 ${total.value} 位学员 · 第 ${query.page} / ${totalPages.value} 页 · 每页 ${query.pageSize} 条`;
+  return `共 ${total.value} 位学员 · 第 ${page.value} / ${totalPages.value} 页 · 每页 ${pageSize.value} 条`;
 });
 
 const themeConfig = {
   token: {
-    colorPrimary: "#0f766e",
-    colorInfo: "#0f766e",
-    colorSuccess: "#15803d",
-    colorWarning: "#b45309",
-    colorError: "#b91c1c",
-    borderRadius: 14,
-    fontFamily: '"Noto Sans SC","PingFang SC","Microsoft YaHei",sans-serif',
+    colorPrimary: "#2563eb",
+    colorInfo: "#2563eb",
+    colorSuccess: "#16a34a",
+    colorWarning: "#d97706",
+    colorError: "#dc2626",
+    borderRadius: 16,
+    fontFamily:
+      '"Source Han Sans SC","PingFang SC","Noto Sans CJK SC","Microsoft YaHei",sans-serif',
   },
 };
-
-function formatTime(value: string): string {
-  return dateFormatter.format(new Date(value));
-}
 
 function getErrorMessage(error: unknown): string {
   if (error instanceof Error && error.message) {
@@ -78,13 +88,101 @@ function getErrorMessage(error: unknown): string {
   return "请求失败，请稍后重试";
 }
 
+function replacePath(path: string) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  if (window.location.pathname !== path) {
+    window.history.replaceState(null, "", path);
+  }
+}
+
+function clearDashboardState() {
+  students.value = [];
+  total.value = 0;
+  resetPage();
+  query.keyword = "";
+  editModalOpen.value = false;
+  editingRecord.value = null;
+  liveText.value = "系统就绪";
+}
+
+function getToken() {
+  if (typeof window === "undefined") {
+    return "";
+  }
+
+  return window.localStorage.getItem(TOKEN_KEY) ?? "";
+}
+
+function syncAuthState() {
+  const token = getToken();
+  isAuthenticated.value = Boolean(token);
+
+  if (isAuthenticated.value) {
+    if (window.location.pathname === LOGIN_PATH) {
+      replacePath(DASHBOARD_PATH);
+    }
+    return;
+  }
+
+  clearDashboardState();
+  replacePath(LOGIN_PATH);
+}
+
+function handleLogout(options?: { silent?: boolean }) {
+  if (typeof window !== "undefined") {
+    window.localStorage.removeItem(TOKEN_KEY);
+  }
+
+  isAuthenticated.value = false;
+  clearDashboardState();
+  replacePath(LOGIN_PATH);
+
+  if (!options?.silent) {
+    message.success("已退出登录");
+  }
+}
+
+async function handleLogin() {
+  const username = loginForm.username.trim();
+  const password = loginForm.password.trim();
+
+  if (!username || !password) {
+    message.warning("请输入用户名和密码");
+    return;
+  }
+
+  loginLoading.value = true;
+  try {
+    const result = await request.post<{ token: string }>("/auth/login", {
+      username,
+      password,
+    });
+
+    window.localStorage.setItem(TOKEN_KEY, result.token);
+    isAuthenticated.value = true;
+    loginForm.username = "";
+    loginForm.password = "";
+    replacePath(DASHBOARD_PATH);
+    message.success("登录成功");
+    readQueryFromUrl();
+    await fetchStudents();
+  } catch (error) {
+    message.error(getErrorMessage(error));
+  } finally {
+    loginLoading.value = false;
+  }
+}
+
 function readQueryFromUrl() {
   const params = new URLSearchParams(window.location.search);
   const nextPage = Number(params.get("page") ?? "1");
   const nextPageSize = Number(params.get("pageSize") ?? "10");
 
-  query.page = Number.isInteger(nextPage) && nextPage > 0 ? nextPage : 1;
-  query.pageSize =
+  page.value = Number.isInteger(nextPage) && nextPage > 0 ? nextPage : 1;
+  pageSize.value =
     Number.isInteger(nextPageSize) && [5, 10, 20, 50].includes(nextPageSize)
       ? nextPageSize
       : 10;
@@ -93,11 +191,11 @@ function readQueryFromUrl() {
 
 function writeQueryToUrl() {
   const params = new URLSearchParams();
-  if (query.page > 1) {
-    params.set("page", String(query.page));
+  if (page.value > 1) {
+    params.set("page", String(page.value));
   }
-  if (query.pageSize !== 10) {
-    params.set("pageSize", String(query.pageSize));
+  if (pageSize.value !== 10) {
+    params.set("pageSize", String(pageSize.value));
   }
   if (query.keyword.trim()) {
     params.set("keyword", query.keyword.trim());
@@ -110,27 +208,27 @@ function writeQueryToUrl() {
 
 async function fetchStudents(options?: { resetPage?: boolean; skipOverflowCheck?: boolean }) {
   if (options?.resetPage) {
-    query.page = 1;
+    resetPage();
   }
 
-  loading.value = true;
-  liveText.value = "正在同步学员列表";
+  uiState.listLoading = true;
+  liveText.value = "正在同步学员列表…";
 
   try {
     const data: StudentListData = await listStudents({
-      page: query.page,
-      pageSize: query.pageSize,
+      page: page.value,
+      pageSize: pageSize.value,
       keyword: query.keyword.trim() || undefined,
     });
 
     students.value = data.list;
     total.value = data.total;
-    query.page = data.page;
-    query.pageSize = data.pageSize;
+    page.value = data.page;
+    pageSize.value = data.pageSize;
 
-    const maxPage = Math.max(1, Math.ceil(total.value / query.pageSize));
-    if (!options?.skipOverflowCheck && query.page > maxPage) {
-      query.page = maxPage;
+    const maxPage = Math.max(1, Math.ceil(total.value / pageSize.value));
+    if (!options?.skipOverflowCheck && page.value > maxPage) {
+      page.value = maxPage;
       await fetchStudents({ skipOverflowCheck: true });
       return;
     }
@@ -142,286 +240,443 @@ async function fetchStudents(options?: { resetPage?: boolean; skipOverflowCheck?
     liveText.value = errorMessage;
     message.error(errorMessage);
   } finally {
-    loading.value = false;
+    uiState.listLoading = false;
   }
 }
 
-async function handleCreate() {
-  const name = createForm.name.trim();
-  if (!name) {
-    message.warning("请输入学员姓名");
-    return;
-  }
-
-  creating.value = true;
+async function handleCreate(payload: { name: string; phone?: string }) {
+  uiState.saving = true;
   try {
     await createStudent({
-      name,
-      phone: createForm.phone.trim() || null,
+      name: payload.name.trim(),
+      phone: payload.phone?.trim() || null,
     });
 
-    createForm.name = "";
-    createForm.phone = "";
     message.success("学员创建成功");
     await fetchStudents();
   } catch (error) {
     message.error(getErrorMessage(error));
   } finally {
-    creating.value = false;
+    uiState.saving = false;
   }
 }
 
 async function handleDelete(id: number) {
-  deletingId.value = id;
+  uiState.deletingId = id;
   try {
     await removeStudent(id);
     message.success("学员已删除");
 
-    const nextTotal = Math.max(0, total.value - 1);
-    const totalPagesAfterDelete = Math.max(1, Math.ceil(nextTotal / query.pageSize));
-    if (query.page > totalPagesAfterDelete) {
-      query.page = totalPagesAfterDelete;
+    if (students.value.length === 1 && page.value > 1) {
+      page.value -= 1;
     }
 
     await fetchStudents();
   } catch (error) {
     message.error(getErrorMessage(error));
   } finally {
-    deletingId.value = null;
+    uiState.deletingId = null;
+  }
+}
+
+function handleOpenEdit(record: Student) {
+  editingRecord.value = record;
+  editModalOpen.value = true;
+}
+
+function handleCloseEdit() {
+  if (uiState.saving) {
+    return;
+  }
+
+  editModalOpen.value = false;
+  editingRecord.value = null;
+}
+
+async function handleEdit(payload: {
+  id: number;
+  payload: { name?: string; phone?: string | null };
+}) {
+  uiState.saving = true;
+  try {
+    await updateStudent(payload.id, payload.payload);
+    message.success("学员信息已更新");
+    await fetchStudents();
+    editModalOpen.value = false;
+    editingRecord.value = null;
+  } catch (error) {
+    message.error(getErrorMessage(error));
+  } finally {
+    uiState.saving = false;
   }
 }
 
 function handleRefresh() {
+  if (keywordDebounceTimer) {
+    clearTimeout(keywordDebounceTimer);
+    keywordDebounceTimer = null;
+  }
   void fetchStudents({ resetPage: true });
 }
 
 function handleSearch() {
+  if (keywordDebounceTimer) {
+    clearTimeout(keywordDebounceTimer);
+    keywordDebounceTimer = null;
+  }
   void fetchStudents({ resetPage: true });
 }
 
+function handleKeywordInput() {
+  if (keywordDebounceTimer) {
+    clearTimeout(keywordDebounceTimer);
+  }
+
+  resetPage();
+  keywordDebounceTimer = setTimeout(() => {
+    void fetchStudents();
+    keywordDebounceTimer = null;
+  }, 500);
+}
+
 function handlePageChange(newPage: number) {
-  query.page = newPage;
+  setPage(newPage);
   void fetchStudents();
 }
 
+function handleAuthLogoutEvent() {
+  handleLogout({ silent: true });
+}
+
 onMounted(() => {
+  window.addEventListener(AUTH_LOGOUT_EVENT, handleAuthLogoutEvent);
+  syncAuthState();
+  if (!isAuthenticated.value) {
+    return;
+  }
+
   readQueryFromUrl();
   void fetchStudents();
+});
+
+onBeforeUnmount(() => {
+  window.removeEventListener(AUTH_LOGOUT_EVENT, handleAuthLogoutEvent);
+
+  if (keywordDebounceTimer) {
+    clearTimeout(keywordDebounceTimer);
+    keywordDebounceTimer = null;
+  }
 });
 </script>
 
 <template>
   <a-config-provider :theme="themeConfig">
-    <a class="skip-link" href="#page-main">跳转到主要内容</a>
+    <main v-if="!isAuthenticated" class="login-shell">
+      <section class="login-card" aria-label="登录表单">
+        <p class="login-kicker">舞蹈预约 SaaS</p>
+        <h1>管理员登录</h1>
+        <p class="login-desc">请输入账号密码，登录后进入学员管理工作台。</p>
 
-    <main id="page-main" class="dashboard">
-      <div class="aura aura-left" aria-hidden="true"></div>
-      <div class="aura aura-right" aria-hidden="true"></div>
-      <div class="aura aura-bottom" aria-hidden="true"></div>
+        <a-form layout="vertical" @submit.prevent="handleLogin">
+          <a-form-item label="用户名" required>
+            <a-input
+              v-model:value="loginForm.username"
+              autocomplete="username"
+              placeholder="请输入用户名"
+              @pressEnter="handleLogin"
+            >
+              <template #prefix>
+                <UserOutlined aria-hidden="true" />
+              </template>
+            </a-input>
+          </a-form-item>
 
-      <section class="hero-card panel">
-        <div class="hero-title">
-          <p class="hero-kicker">舞蹈预约 SaaS</p>
-          <h1>学员运营工作台</h1>
-          <p class="hero-desc">
-            围绕学员档案做增删与检索，列表状态实时同步，适合日常教务的轻量化管理。
-          </p>
-        </div>
+          <a-form-item label="密码" required>
+            <a-input-password
+              v-model:value="loginForm.password"
+              autocomplete="current-password"
+              placeholder="请输入密码"
+              @pressEnter="handleLogin"
+            >
+              <template #prefix>
+                <LockOutlined aria-hidden="true" />
+              </template>
+            </a-input-password>
+          </a-form-item>
 
-        <div class="hero-metrics">
-          <div class="metric-item">
-            <span>学员总数</span>
-            <strong>{{ total }}</strong>
-          </div>
-          <div class="metric-item">
-            <span>当前页码</span>
-            <strong>{{ query.page }}</strong>
-          </div>
-          <div class="metric-item">
-            <span>每页条数</span>
-            <strong>{{ query.pageSize }}</strong>
-          </div>
-        </div>
+          <a-button block type="primary" :loading="loginLoading" @click="handleLogin">
+            <template #icon>
+              <LoginOutlined aria-hidden="true" />
+            </template>
+            登录
+          </a-button>
+        </a-form>
       </section>
+    </main>
 
-      <section class="grid-panels">
-        <a-card class="panel create-panel" :bordered="false" title="新增学员">
-          <a-form layout="vertical" @submit.prevent="handleCreate">
-            <a-form-item label="学员姓名" required>
-              <a-input
-                v-model:value="createForm.name"
-                placeholder="请输入学员姓名"
-                autocomplete="name"
-                allow-clear
-              />
-            </a-form-item>
+    <template v-else>
+      <a class="skip-link" href="#page-main">跳转到主要内容</a>
 
-            <a-form-item label="联系电话（可选）">
-              <a-input
-                v-model:value="createForm.phone"
-                placeholder="请输入手机号"
-                autocomplete="tel"
-                allow-clear
-              />
-            </a-form-item>
+      <main id="page-main" class="dashboard">
+        <div class="orb orb-left" aria-hidden="true"></div>
+        <div class="orb orb-right" aria-hidden="true"></div>
+        <div class="orb orb-bottom" aria-hidden="true"></div>
 
-            <a-space wrap>
-              <a-button type="primary" :loading="creating" @click="handleCreate">
+        <header class="workspace-toolbar panel">
+          <div class="workspace-meta">
+            <p class="workspace-kicker">控制中心</p>
+            <h2>教务工作台</h2>
+            <p>欢迎回来，当前已连接到学员服务。</p>
+          </div>
+
+          <div class="workspace-actions">
+            <a-tag color="success">在线状态</a-tag>
+
+            <a-dropdown :trigger="['click']">
+              <a-button class="settings-btn">
                 <template #icon>
-                  <PlusOutlined />
+                  <SettingOutlined aria-hidden="true" />
                 </template>
-                立即创建
+                设置
               </a-button>
-              <a-button :loading="loading" @click="handleRefresh">
+
+              <template #overlay>
+                <a-menu :selectable="false">
+                  <a-menu-item key="logout" @click="handleLogout()">
+                    <template #icon>
+                      <LogoutOutlined aria-hidden="true" />
+                    </template>
+                    退出登录
+                  </a-menu-item>
+                </a-menu>
+              </template>
+            </a-dropdown>
+          </div>
+        </header>
+
+        <section class="hero-card panel">
+          <div class="hero-title">
+            <p class="hero-kicker">舞蹈预约 SaaS</p>
+            <h1>学员运营工作台</h1>
+            <p class="hero-desc">
+              把学员数据管理做成一个统一入口，新增、检索、分页与删除全流程实时联动。
+            </p>
+            <div class="hero-pill-row" aria-hidden="true">
+              <span class="hero-pill">实时同步</span>
+              <span class="hero-pill">分页检索</span>
+              <span class="hero-pill">操作可追踪</span>
+            </div>
+          </div>
+
+          <div class="hero-metrics">
+            <div class="metric-item">
+              <span>学员总数</span>
+              <strong>{{ total }}</strong>
+            </div>
+            <div class="metric-item">
+              <span>当前页码</span>
+              <strong>{{ page }}</strong>
+            </div>
+            <div class="metric-item">
+              <span>每页条数</span>
+              <strong>{{ pageSize }}</strong>
+            </div>
+          </div>
+        </section>
+
+        <section class="grid-panels">
+          <a-card class="panel create-panel" :bordered="false" title="新增学员">
+            <StudentForm :loading="uiState.saving" @create="handleCreate" />
+
+            <div class="create-card-actions">
+              <a-button :loading="uiState.listLoading" @click="handleRefresh">
                 <template #icon>
                   <ReloadOutlined />
                 </template>
                 刷新列表
               </a-button>
-            </a-space>
-          </a-form>
-        </a-card>
+            </div>
+          </a-card>
 
-        <a-card class="panel search-panel" :bordered="false" title="筛选与分页">
-          <a-form layout="vertical">
-            <a-form-item label="姓名关键词">
-              <a-input
-                v-model:value="query.keyword"
-                placeholder="输入关键词后点击搜索"
-                allow-clear
-                @pressEnter="handleSearch"
-              >
-                <template #prefix>
-                  <SearchOutlined />
-                </template>
-              </a-input>
-            </a-form-item>
-
-            <a-form-item label="每页条数">
-              <a-select
-                v-model:value="query.pageSize"
-                :options="[
-                  { label: '每页 5 条', value: 5 },
-                  { label: '每页 10 条', value: 10 },
-                  { label: '每页 20 条', value: 20 },
-                  { label: '每页 50 条', value: 50 },
-                ]"
-                @change="handleSearch"
-              />
-            </a-form-item>
-
-            <a-space wrap>
-              <a-button type="primary" @click="handleSearch">
-                <template #icon>
-                  <SearchOutlined />
-                </template>
-                执行搜索
-              </a-button>
-              <a-button @click="handleRefresh">
-                <template #icon>
-                  <ReloadOutlined />
-                </template>
-                重新加载
-              </a-button>
-            </a-space>
-
-            <p class="summary">{{ summaryText }}</p>
-            <p class="live" aria-live="polite">{{ liveText }}</p>
-          </a-form>
-        </a-card>
-      </section>
-
-      <a-card class="panel table-panel" :bordered="false">
-        <template #title>
-          <div class="table-title">
-            <span>学员列表</span>
-            <a-space size="small">
-              <a-tag color="processing">
-                <template #icon>
-                  <TeamOutlined />
-                </template>
-                实时数据
-              </a-tag>
-              <a-tag color="success">
-                <template #icon>
-                  <CalendarOutlined />
-                </template>
-                本地时间显示
-              </a-tag>
-            </a-space>
-          </div>
-        </template>
-
-        <a-table
-          :data-source="students"
-          :loading="loading"
-          :pagination="false"
-          :scroll="{ x: 860 }"
-          row-key="id"
-          :locale="{ emptyText: '暂无学员数据' }"
-        >
-          <a-table-column title="编号" data-index="id" key="id" width="90" />
-          <a-table-column title="姓名" data-index="name" key="name" width="180" />
-          <a-table-column title="手机号" data-index="phone" key="phone" width="220">
-            <template #default="{ record }">
-              {{ record.phone || "未填写" }}
-            </template>
-          </a-table-column>
-          <a-table-column title="创建时间" key="createdAt" width="260">
-            <template #default="{ record }">
-              <span class="time-text">{{ formatTime(record.createdAt) }}</span>
-            </template>
-          </a-table-column>
-          <a-table-column title="操作" key="action" width="130" fixed="right">
-            <template #default="{ record }">
-              <a-popconfirm
-                title="确认删除该学员吗？"
-                ok-text="确认"
-                cancel-text="取消"
-                @confirm="handleDelete(record.id)"
-              >
-                <a-button danger size="small" :loading="deletingId === record.id">
-                  <template #icon>
-                    <DeleteOutlined />
+          <a-card class="panel search-panel" :bordered="false" title="筛选与分页">
+            <a-form layout="vertical">
+              <a-form-item label="姓名关键词">
+                <a-input
+                  v-model:value="query.keyword"
+                  name="keyword"
+                  autocomplete="off"
+                  placeholder="输入关键词后点击搜索…"
+                  allow-clear
+                  @input="handleKeywordInput"
+                  @pressEnter="handleSearch"
+                >
+                  <template #prefix>
+                    <SearchOutlined aria-hidden="true" />
                   </template>
-                  删除
-                </a-button>
-              </a-popconfirm>
-            </template>
-          </a-table-column>
-        </a-table>
+                </a-input>
+              </a-form-item>
 
-        <Pagination
-          :page="query.page"
-          :page-size="query.pageSize"
-          :total="total"
-          @change="handlePageChange"
-        />
-      </a-card>
-    </main>
+              <a-form-item label="每页条数">
+                <a-select
+                  v-model:value="pageSize"
+                  :options="[
+                    { label: '每页 5 条', value: 5 },
+                    { label: '每页 10 条', value: 10 },
+                    { label: '每页 20 条', value: 20 },
+                    { label: '每页 50 条', value: 50 },
+                  ]"
+                  @change="handleSearch"
+                />
+              </a-form-item>
+
+              <a-space wrap>
+                <a-button type="primary" @click="handleSearch">
+                  <template #icon>
+                    <SearchOutlined aria-hidden="true" />
+                  </template>
+                  执行搜索
+                </a-button>
+                <a-button @click="handleRefresh">
+                  <template #icon>
+                    <ReloadOutlined aria-hidden="true" />
+                  </template>
+                  重新加载
+                </a-button>
+              </a-space>
+
+              <p class="summary">{{ summaryText }}</p>
+              <p class="live" aria-live="polite">{{ liveText }}</p>
+            </a-form>
+          </a-card>
+        </section>
+
+        <a-card class="panel table-panel" :bordered="false">
+          <template #title>
+            <div class="table-title">
+              <span>学员列表</span>
+              <a-space size="small">
+                <a-tag color="processing">
+                  <template #icon>
+                    <TeamOutlined aria-hidden="true" />
+                  </template>
+                  实时数据
+                </a-tag>
+                <a-tag color="success">
+                  <template #icon>
+                    <CalendarOutlined aria-hidden="true" />
+                  </template>
+                  本地时间显示
+                </a-tag>
+              </a-space>
+            </div>
+          </template>
+
+          <a-spin :spinning="uiState.listLoading">
+            <StudentTable
+              :list="students"
+              :deleting-id="uiState.deletingId"
+              :saving="uiState.saving"
+              :edit-modal-open="editModalOpen"
+              :editing-record="editingRecord"
+              @remove="handleDelete"
+              @open-edit="handleOpenEdit"
+              @close-edit="handleCloseEdit"
+              @edit="handleEdit"
+            />
+          </a-spin>
+
+          <Pagination
+            :page="page"
+            :page-size="pageSize"
+            :total="total"
+            @change="handlePageChange"
+          />
+        </a-card>
+      </main>
+    </template>
   </a-config-provider>
 </template>
 
 <style scoped>
+.login-shell {
+  min-height: 100vh;
+  padding:
+    calc(24px + env(safe-area-inset-top))
+    calc(16px + env(safe-area-inset-right))
+    calc(24px + env(safe-area-inset-bottom))
+    calc(16px + env(safe-area-inset-left));
+  display: grid;
+  place-items: center;
+  background:
+    radial-gradient(circle at 15% 10%, rgba(37, 99, 235, 0.2) 0%, transparent 45%),
+    radial-gradient(circle at 90% 20%, rgba(6, 182, 212, 0.16) 0%, transparent 40%),
+    linear-gradient(145deg, #f6f9ff 0%, #eff6ff 50%, #edfcff 100%);
+}
+
+.login-card {
+  width: min(460px, 100%);
+  border-radius: 20px;
+  border: 1px solid rgba(37, 99, 235, 0.14);
+  background: rgba(255, 255, 255, 0.82);
+  padding: 28px 24px;
+  box-shadow:
+    0 18px 40px rgba(30, 64, 175, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.78);
+  backdrop-filter: blur(14px);
+}
+
+.login-kicker {
+  margin: 0 0 6px;
+  color: #1d4ed8;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+}
+
+.login-card h1 {
+  margin: 0;
+  font-size: clamp(30px, 7vw, 42px);
+  line-height: 1.1;
+  letter-spacing: 0.01em;
+  font-family:
+    "Source Han Serif SC",
+    "STZhongsong",
+    "Songti SC",
+    serif;
+  color: #0b1a3f;
+}
+
+.login-desc {
+  margin: 10px 0 18px;
+  color: #475569;
+  line-height: 1.7;
+}
+
+:deep(.login-card .ant-form-item-label > label) {
+  color: #1e3a8a;
+  font-weight: 600;
+}
+
 .dashboard {
-  --bg-1: #f0f9f6;
-  --bg-2: #f8f3e8;
-  --line: rgba(15, 118, 110, 0.14);
-  --text-1: #0b2330;
-  --text-2: #4a6372;
-  --panel: rgba(255, 255, 255, 0.74);
+  --bg-1: #f4f7ff;
+  --bg-2: #ebf2ff;
+  --bg-3: #eefbff;
+  --line: rgba(8, 47, 153, 0.16);
+  --text-1: #0b1633;
+  --text-2: #3b4b72;
+  --panel: rgba(255, 255, 255, 0.8);
 
   position: relative;
   min-height: 100vh;
   padding:
     calc(24px + env(safe-area-inset-top))
     calc(16px + env(safe-area-inset-right))
-    calc(28px + env(safe-area-inset-bottom))
+    calc(30px + env(safe-area-inset-bottom))
     calc(16px + env(safe-area-inset-left));
   background:
-    radial-gradient(circle at 8% 8%, rgba(16, 185, 129, 0.2) 0%, transparent 34%),
-    radial-gradient(circle at 92% 12%, rgba(14, 116, 144, 0.18) 0%, transparent 32%),
-    linear-gradient(140deg, var(--bg-1) 0%, var(--bg-2) 100%);
+    radial-gradient(circle at 12% 2%, rgba(29, 78, 216, 0.22) 0%, transparent 42%),
+    radial-gradient(circle at 94% 12%, rgba(6, 182, 212, 0.2) 0%, transparent 42%),
+    radial-gradient(circle at 55% 100%, rgba(14, 165, 233, 0.12) 0%, transparent 44%),
+    linear-gradient(145deg, var(--bg-1) 0%, var(--bg-2) 48%, var(--bg-3) 100%);
   color: var(--text-1);
   overflow-x: hidden;
 }
@@ -434,7 +689,7 @@ onMounted(() => {
   padding: 10px 14px;
   border-radius: 10px;
   color: #fff;
-  background: #0f766e;
+  background: #1d4ed8;
   text-decoration: none;
 }
 
@@ -444,36 +699,82 @@ onMounted(() => {
   outline-offset: 2px;
 }
 
-.aura {
+.orb {
   position: fixed;
   z-index: 0;
   pointer-events: none;
-  filter: blur(40px);
-  opacity: 0.45;
+  filter: blur(44px);
+  opacity: 0.5;
 }
 
-.aura-left {
-  left: -40px;
-  top: -30px;
-  width: 220px;
-  height: 220px;
-  background: #22c55e;
+.workspace-toolbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+  padding: 14px 18px;
 }
 
-.aura-right {
-  top: 100px;
+.workspace-meta h2 {
+  margin: 2px 0 4px;
+  font-size: clamp(20px, 4vw, 28px);
+  color: #102a6a;
+}
+
+.workspace-meta p {
+  margin: 0;
+  color: #4b5f89;
+}
+
+.workspace-kicker {
+  margin: 0;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  color: #1d4ed8;
+  font-weight: 700;
+}
+
+.workspace-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+}
+
+.settings-btn {
+  border-radius: 999px;
+  border-color: rgba(59, 130, 246, 0.35);
+  background: linear-gradient(135deg, rgba(241, 245, 255, 0.95) 0%, rgba(236, 254, 255, 0.92) 100%);
+  color: #1d4ed8;
+  font-weight: 600;
+}
+
+.settings-btn:hover {
+  border-color: #60a5fa;
+  color: #1e40af;
+}
+
+.orb-left {
+  left: -50px;
+  top: -50px;
+  width: 240px;
+  height: 240px;
+  background: #3b82f6;
+}
+
+.orb-right {
+  top: 120px;
   right: -40px;
   width: 260px;
   height: 260px;
   background: #06b6d4;
 }
 
-.aura-bottom {
-  bottom: -80px;
-  left: 32%;
-  width: 280px;
-  height: 280px;
-  background: #f59e0b;
+.orb-bottom {
+  bottom: -90px;
+  left: 30%;
+  width: 320px;
+  height: 320px;
+  background: #22d3ee;
 }
 
 .panel,
@@ -483,12 +784,24 @@ onMounted(() => {
   width: min(1160px, 100%);
   margin: 0 auto 16px;
   border: 1px solid var(--line);
-  border-radius: 18px;
+  border-radius: 20px;
   background: var(--panel);
   box-shadow:
-    0 12px 34px rgba(9, 39, 54, 0.1),
-    inset 0 1px 0 rgba(255, 255, 255, 0.66);
-  backdrop-filter: blur(10px);
+    0 18px 42px rgba(30, 64, 175, 0.12),
+    inset 0 1px 0 rgba(255, 255, 255, 0.74);
+  backdrop-filter: blur(14px);
+  overflow: clip;
+}
+
+.panel::before,
+.hero-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 auto auto 0;
+  width: 100%;
+  height: 3px;
+  background: linear-gradient(90deg, #1d4ed8 0%, #0ea5e9 55%, #22d3ee 100%);
+  opacity: 0.88;
 }
 
 .hero-card {
@@ -500,22 +813,23 @@ onMounted(() => {
 
 .hero-kicker {
   margin: 0;
-  color: #0f766e;
+  color: #1d4ed8;
   font-weight: 700;
   letter-spacing: 0.08em;
 }
 
 .hero-title h1 {
   margin: 8px 0 12px;
-  font-size: clamp(30px, 5.4vw, 54px);
-  line-height: 1.05;
+  font-size: clamp(32px, 5.4vw, 56px);
+  line-height: 1.04;
   letter-spacing: 0.01em;
   text-wrap: balance;
   font-family:
+    "Source Han Serif SC",
     "STZhongsong",
     "Songti SC",
-    "Noto Serif CJK SC",
     serif;
+  color: #0b1a3f;
 }
 
 .hero-desc {
@@ -523,6 +837,24 @@ onMounted(() => {
   max-width: 62ch;
   color: var(--text-2);
   line-height: 1.8;
+}
+
+.hero-pill-row {
+  margin-top: 12px;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.hero-pill {
+  display: inline-flex;
+  align-items: center;
+  border-radius: 999px;
+  padding: 4px 10px;
+  font-size: 12px;
+  color: #1e3a8a;
+  background: rgba(219, 234, 254, 0.8);
+  border: 1px solid rgba(147, 197, 253, 0.72);
 }
 
 .hero-metrics {
@@ -535,20 +867,22 @@ onMounted(() => {
 .metric-item {
   padding: 12px;
   border-radius: 14px;
-  border: 1px solid rgba(15, 118, 110, 0.16);
-  background: rgba(255, 255, 255, 0.72);
+  border: 1px solid rgba(96, 165, 250, 0.42);
+  background: linear-gradient(160deg, rgba(255, 255, 255, 0.97) 0%, rgba(232, 246, 255, 0.76) 100%);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.7);
 }
 
 .metric-item span {
   display: block;
   margin-bottom: 4px;
-  color: #5d7482;
+  color: #4f6684;
   font-size: 13px;
 }
 
 .metric-item strong {
   font-size: 24px;
   font-variant-numeric: tabular-nums;
+  color: #0f2b6d;
 }
 
 .grid-panels {
@@ -561,15 +895,19 @@ onMounted(() => {
   gap: 16px;
 }
 
+.create-card-actions {
+  margin-top: 12px;
+}
+
 .summary {
   margin: 14px 0 8px;
-  color: #1f5b57;
+  color: #1e3a8a;
   font-variant-numeric: tabular-nums;
 }
 
 .live {
   margin: 0;
-  color: #3b5564;
+  color: #0f766e;
 }
 
 .table-title {
@@ -579,14 +917,26 @@ onMounted(() => {
   gap: 10px;
 }
 
-.time-text {
-  font-variant-numeric: tabular-nums;
-  color: #24414f;
+:deep(.workspace-toolbar .ant-tag) {
+  border-radius: 999px;
+  padding-inline: 10px;
+}
+
+:deep(.ant-card-head) {
+  border-bottom: 1px solid rgba(191, 219, 254, 0.58);
 }
 
 :deep(.ant-card-head-title) {
   font-size: 20px;
   font-weight: 700;
+  color: #102a6a;
+}
+
+:deep(.ant-input),
+:deep(.ant-select-selector) {
+  border-radius: 12px !important;
+  border-color: #bfdbfe !important;
+  background: rgba(248, 250, 255, 0.92) !important;
 }
 
 :deep(.ant-btn) {
@@ -594,22 +944,56 @@ onMounted(() => {
     transform 140ms ease,
     box-shadow 140ms ease,
     background-color 140ms ease,
-    border-color 140ms ease;
+    border-color 140ms ease,
+    color 140ms ease;
 }
 
-:deep(.ant-btn:hover) {
+:deep(.ant-btn-primary) {
+  border: none;
+  background: linear-gradient(135deg, #1e40af 0%, #2563eb 48%, #06b6d4 100%);
+  box-shadow: 0 8px 20px rgba(37, 99, 235, 0.34);
+}
+
+:deep(.ant-btn-primary:hover) {
   transform: translateY(-1px);
-  box-shadow: 0 6px 14px rgba(15, 118, 110, 0.14);
+  box-shadow: 0 12px 24px rgba(30, 64, 175, 0.34);
+}
+
+:deep(.ant-btn:not(.ant-btn-primary):hover) {
+  transform: translateY(-1px);
+  border-color: #93c5fd;
+  color: #1d4ed8;
+}
+
+:deep(.ant-tag) {
+  border-radius: 999px;
+  padding-inline: 10px;
+}
+
+:deep(.ant-dropdown-menu) {
+  border-radius: 12px;
+  padding: 6px;
+  border: 1px solid rgba(147, 197, 253, 0.56);
+  box-shadow: 0 12px 28px rgba(30, 64, 175, 0.18);
+}
+
+:deep(.ant-dropdown-menu-item) {
+  border-radius: 8px;
 }
 
 :deep(.ant-input:focus-visible),
 :deep(.ant-btn:focus-visible),
 :deep(.ant-select-selector:focus-visible) {
-  outline: 3px solid rgba(15, 118, 110, 0.28);
+  outline: 3px solid rgba(37, 99, 235, 0.28);
   outline-offset: 2px;
 }
 
 @media (max-width: 980px) {
+  .workspace-toolbar {
+    flex-direction: column;
+    align-items: flex-start;
+  }
+
   .hero-card {
     grid-template-columns: 1fr;
   }
@@ -633,7 +1017,7 @@ onMounted(() => {
   }
 
   .hero-title h1 {
-    font-size: clamp(28px, 10vw, 40px);
+    font-size: clamp(30px, 10vw, 44px);
   }
 
   .hero-metrics {
@@ -648,7 +1032,7 @@ onMounted(() => {
 
 @media (prefers-reduced-motion: reduce) {
   :deep(.ant-btn) {
-    transition: background-color 120ms ease, border-color 120ms ease;
+    transition: background-color 120ms ease, border-color 120ms ease, color 120ms ease;
     transform: none !important;
   }
 }

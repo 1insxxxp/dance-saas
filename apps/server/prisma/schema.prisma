@@ -61,3 +61,10 @@ model Booking {
   @@index([classSessionId])
   @@index([studentId])
 }
+
+model Admin {
+  id        Int      @id @default(autoincrement())
+  username  String   @unique
+  password  String
+  createdAt DateTime @default(now())
+}

@@ -1,4 +1,4 @@
-import { request } from "../lib/request";
+import { request } from "./request";
 
 export interface Student {
   id: number;
@@ -30,6 +30,12 @@ export interface UpdateStudentPayload {
   phone?: string | null;
 }
 
+export interface StudentApiResponse {
+  code: number;
+  message: string;
+  data: Student;
+}
+
 export async function listStudents(
   params: ListStudentsParams = {},
 ): Promise<StudentListData> {
@@ -45,8 +51,13 @@ export async function createStudent(
 export async function updateStudent(
   id: number,
   payload: UpdateStudentPayload,
-): Promise<Student> {
-  return request.patch<Student>(`/students/${id}`, payload);
+): Promise<StudentApiResponse> {
+  const data = await request.patch<Student>(`/students/${id}`, payload);
+  return {
+    code: 0,
+    message: "ok",
+    data,
+  };
 }
 
 export async function removeStudent(id: number): Promise<Student> {

@@ -1,4 +1,4 @@
-<script setup lang="ts">
+﻿<script setup lang="ts">
 import { computed, useAttrs } from "vue";
 
 const props = defineProps<{
@@ -11,7 +11,6 @@ const emit = defineEmits<{
   (e: "change", newPage: number): void;
 }>();
 
-// 兼容未改造页面：如果外部传的是 current，则回退使用 current。
 const attrs = useAttrs() as {
   current?: number;
 };
@@ -52,14 +51,13 @@ function goNext() {
 </script>
 
 <template>
-  <div class="pagination">
-    <button type="button" :disabled="isPrevDisabled" @click="goPrev">上一页</button>
+  <div class="pagination" aria-label="分页导航">
+    <p class="info">第 {{ currentPage }} / {{ totalPages }} 页，共 {{ total }} 条</p>
 
-    <span class="info">
-      第 {{ currentPage }} / {{ totalPages }} 页，共 {{ total }} 条
-    </span>
-
-    <button type="button" :disabled="isNextDisabled" @click="goNext">下一页</button>
+    <div class="actions">
+      <button type="button" class="nav-btn" :disabled="isPrevDisabled" @click="goPrev">上一页</button>
+      <button type="button" class="nav-btn nav-btn-next" :disabled="isNextDisabled" @click="goNext">下一页</button>
+    </div>
   </div>
 </template>
 
@@ -67,25 +65,66 @@ function goNext() {
 .pagination {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  margin-top: 14px;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  gap: 12px;
+  margin-top: 16px;
+  padding-top: 12px;
+  border-top: 1px dashed rgba(147, 197, 253, 0.65);
 }
 
 .info {
+  margin: 0;
   font-size: 14px;
+  color: #1e3a8a;
+  font-variant-numeric: tabular-nums;
 }
 
-button {
-  padding: 6px 12px;
-  border: 1px solid #d0d7de;
-  border-radius: 6px;
-  background: #fff;
+.actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.nav-btn {
+  min-width: 82px;
+  padding: 7px 12px;
+  border: 1px solid #bfdbfe;
+  border-radius: 10px;
+  background: linear-gradient(180deg, #ffffff 0%, #f8fbff 100%);
+  color: #1e3a8a;
   cursor: pointer;
+  transition:
+    transform 120ms ease,
+    box-shadow 120ms ease,
+    border-color 120ms ease,
+    background-color 120ms ease;
 }
 
-button:disabled {
+.nav-btn-next {
+  border-color: #93c5fd;
+  background: linear-gradient(135deg, #dbeafe 0%, #eff6ff 100%);
+}
+
+.nav-btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  border-color: #60a5fa;
+  box-shadow: 0 8px 16px rgba(37, 99, 235, 0.15);
+}
+
+.nav-btn:disabled {
   cursor: not-allowed;
-  opacity: 0.5;
+  opacity: 0.45;
+}
+
+@media (max-width: 640px) {
+  .pagination {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .actions {
+    justify-content: flex-end;
+  }
 }
 </style>
