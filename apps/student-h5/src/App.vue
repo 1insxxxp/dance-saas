@@ -28,7 +28,6 @@ import StudentTable from "./components/StudentTable.vue";
 
 const TOKEN_KEY = "token";
 const ACCESS_TOKEN_KEY = "accessToken";
-const REFRESH_TOKEN_KEY = "refreshToken";
 const ROLE_KEY = "role";
 const LOGIN_PATH = "/login";
 const DASHBOARD_PATH = "/";
@@ -198,7 +197,7 @@ function handleLogout(options?: { silent?: boolean }) {
   if (typeof window !== "undefined") {
     window.localStorage.removeItem(ACCESS_TOKEN_KEY);
     window.localStorage.removeItem(TOKEN_KEY);
-    window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+    window.localStorage.removeItem("refreshToken");
   }
   setRole("");
 
@@ -225,7 +224,6 @@ async function handleLogin() {
     const result = await request.post<{
       token?: string;
       accessToken?: string;
-      refreshToken?: string;
       role?: "SUPER" | "NORMAL";
     }>("/auth/login", {
       username,
@@ -233,14 +231,12 @@ async function handleLogin() {
     });
 
     const accessToken = result.accessToken ?? result.token;
-    const refreshToken = result.refreshToken;
-    if (!accessToken || !refreshToken) {
+    if (!accessToken) {
       throw new Error("登录返回的 token 数据不完整");
     }
 
     window.localStorage.setItem(ACCESS_TOKEN_KEY, accessToken);
     window.localStorage.setItem(TOKEN_KEY, accessToken);
-    window.localStorage.setItem(REFRESH_TOKEN_KEY, refreshToken);
     setRole(normalizeRole(result.role) || extractRoleFromToken(accessToken));
     isAuthenticated.value = true;
     loginForm.username = "";

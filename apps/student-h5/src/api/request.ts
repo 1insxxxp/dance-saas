@@ -21,7 +21,6 @@ export interface ApiResponse<T> {
 interface RefreshTokenResult {
   token?: string;
   accessToken?: string;
-  refreshToken?: string;
 }
 
 /**
@@ -35,9 +34,10 @@ declare module "axios" {
 
 // 本地存储键名（兼容历史 token 键）。
 const ACCESS_TOKEN_KEY = "accessToken";
-const REFRESH_TOKEN_KEY = "refreshToken";
 const LEGACY_TOKEN_KEY = "token";
 const ROLE_KEY = "role";
+const CSRF_COOKIE_KEY = "csrfToken";
+const CSRF_HEADER_KEY = "x-csrf-token";
 
 // 登录页路径与登出事件名。
 const LOGIN_PATH = "/login";
@@ -56,6 +56,7 @@ if (!apiBase) {
  */
 const instance = axios.create({
   baseURL: apiBase,
+  withCredentials: true,
   timeout: 10000,
 });
 
@@ -64,6 +65,7 @@ const instance = axios.create({
  */
 const authClient = axios.create({
   baseURL: apiBase,
+  withCredentials: true,
   timeout: 10000,
 });
 
@@ -88,18 +90,33 @@ function getAccessToken(): string {
 }
 
 /**
- * 读取 refreshToken。
+ * 从 document.cookie 读取指定 cookie 值。
  */
-function getRefreshToken(): string {
-  if (typeof window === "undefined") {
+function getCookieValue(cookieName: string): string {
+  if (typeof document === "undefined") {
     return "";
   }
 
-  return window.localStorage.getItem(REFRESH_TOKEN_KEY) ?? "";
+  const matchedCookie = document.cookie
+    .split(";")
+    .map((cookie) => cookie.trim())
+    .find((cookie) => cookie.startsWith(`${cookieName}=`));
+
+  if (!matchedCookie) {
+    return "";
+  }
+
+  const encodedValue = matchedCookie.slice(cookieName.length + 1);
+  try {
+    return decodeURIComponent(encodedValue);
+  } catch {
+    return encodedValue;
+  }
 }
 
 /**
- * 将 refresh 成功后的新 token 写回本地，并返回新的 accessToken。
+ * 将 refresh 成功后的新 accessToken 写回本地，并返回该 token。
+ * 注意：refreshToken 由后端通过 httpOnly cookie 维护，前端不再存储。
  */
 function persistTokens(data: RefreshTokenResult): string {
   if (typeof window === "undefined") {
@@ -107,15 +124,13 @@ function persistTokens(data: RefreshTokenResult): string {
   }
 
   const nextAccessToken = data.accessToken ?? data.token;
-  const nextRefreshToken = data.refreshToken;
 
-  if (!nextAccessToken || !nextRefreshToken) {
+  if (!nextAccessToken) {
     throw new Error("invalid refresh response");
   }
 
   window.localStorage.setItem(ACCESS_TOKEN_KEY, nextAccessToken);
   window.localStorage.setItem(LEGACY_TOKEN_KEY, nextAccessToken);
-  window.localStorage.setItem(REFRESH_TOKEN_KEY, nextRefreshToken);
   return nextAccessToken;
 }
 
@@ -129,7 +144,7 @@ function clearAuthAndRedirectToLogin() {
 
   window.localStorage.removeItem(ACCESS_TOKEN_KEY);
   window.localStorage.removeItem(LEGACY_TOKEN_KEY);
-  window.localStorage.removeItem(REFRESH_TOKEN_KEY);
+  window.localStorage.removeItem("refreshToken");
   window.localStorage.removeItem(ROLE_KEY);
   window.dispatchEvent(new CustomEvent(AUTH_LOGOUT_EVENT));
 
@@ -159,22 +174,17 @@ function normalizeError(error: unknown): Error {
 
 /**
  * 执行 refresh 续签：
- * 1) 没有 refreshToken 直接失败
+ * 1) refreshToken 由浏览器自动携带 cookie
  * 2) 有并发时复用 refreshPromise
- * 3) 成功后更新本地 token
+ * 3) 成功后更新本地 accessToken
  */
 async function refreshAccessToken(): Promise<string> {
   if (refreshPromise) {
     return refreshPromise;
   }
 
-  const refreshToken = getRefreshToken();
-  if (!refreshToken) {
-    throw new Error("missing refresh token");
-  }
-
   refreshPromise = authClient
-    .post<ApiResponse<RefreshTokenResult>>("/auth/refresh", { refreshToken })
+    .post<ApiResponse<RefreshTokenResult>>("/auth/refresh")
     .then((response) => {
       const payload = response.data;
       if (payload.code !== 0) {
@@ -198,28 +208,61 @@ async function replayRequestWithNewToken(
 ): Promise<AxiosResponse<ApiResponse<unknown>>> {
   const nextAccessToken = await refreshAccessToken();
   const headers = AxiosHeaders.from(config.headers);
+  const csrfToken = getCookieValue(CSRF_COOKIE_KEY);
   headers.set("Authorization", `Bearer ${nextAccessToken}`);
+  if (csrfToken) {
+    headers.set(CSRF_HEADER_KEY, csrfToken);
+  }
   config.headers = headers;
   config._retry = true;
   return instance.request(config);
 }
 
 /**
- * 请求拦截：每个请求自动注入 accessToken。
+ * 将 accessToken + csrfToken 注入请求头。
+ */
+function attachRequestHeaders(
+  config: InternalAxiosRequestConfig,
+  options: { includeAccessToken: boolean },
+): InternalAxiosRequestConfig {
+  const headers = AxiosHeaders.from(config.headers);
+
+  if (options.includeAccessToken) {
+    const accessToken = getAccessToken();
+    if (accessToken) {
+      headers.set("Authorization", `Bearer ${accessToken}`);
+    }
+  }
+
+  const csrfToken = getCookieValue(CSRF_COOKIE_KEY);
+  if (csrfToken) {
+    headers.set(CSRF_HEADER_KEY, csrfToken);
+  }
+
+  config.headers = headers;
+  return config;
+}
+
+/**
+ * 业务请求拦截：自动注入 accessToken 与 csrfToken。
  */
 instance.interceptors.request.use((config) => {
   if (typeof window === "undefined") {
     return config;
   }
 
-  const accessToken = getAccessToken();
-  if (accessToken) {
-    const headers = AxiosHeaders.from(config.headers);
-    headers.set("Authorization", `Bearer ${accessToken}`);
-    config.headers = headers;
+  return attachRequestHeaders(config, { includeAccessToken: true });
+});
+
+/**
+ * 认证专用拦截：refresh 请求也会附带 csrfToken（不附带 accessToken）。
+ */
+authClient.interceptors.request.use((config) => {
+  if (typeof window === "undefined") {
+    return config;
   }
 
-  return config;
+  return attachRequestHeaders(config, { includeAccessToken: false });
 });
 
 /**
